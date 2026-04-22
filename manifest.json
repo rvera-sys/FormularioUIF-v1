@@ -1,0 +1,25 @@
+{
+  "name": "UIF REMAX CREA",
+  "short_name": "UIF",
+  "description": "Sistema PLAFT-FP 2026 — Formulario UIF · REMAX CREA",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1a4a8a",
+  "theme_color": "#1a4a8a",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
