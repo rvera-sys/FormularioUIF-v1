@@ -1,0 +1,106 @@
+═══════════════════════════════════════════════════════════
+UIF REMAX CREA PWA - VERSIÓN 1.2.1
+═══════════════════════════════════════════════════════════
+
+📅 Fecha: 2026-05-13
+
+✨ NUEVA FUNCIONALIDAD:
+
+🖊️ FIRMAS DE COTITULARES EN PDF
+
+Ahora cada cotitular tiene su propio espacio de firma en el PDF:
+
+✓ Bloque individual por cotitular
+✓ Nombre y documento del cotitular
+✓ Línea de firma y aclaración
+✓ Espacio para lugar y fecha
+✓ Campo de número de documento
+
+ANTES:
+- Solo 1 firma (cliente principal)
+- Cotitulares listados sin firma
+
+AHORA:
+- Firma del cliente principal
+- + Firma cotitular 1 (si existe)
+- + Firma cotitular 2 (si existe)
+- + Firma cotitular 3 (si existe)
+- + Firma cotitular 4 (si existe)
+- Firma del corredor (sujeto obligado)
+
+═══════════════════════════════════════════════════════════
+EJEMPLO EN EL PDF:
+═══════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────┐
+│ FIRMA DEL DECLARANTE                        │
+│ El cliente firma confirmando...             │
+│                                             │
+│ _________________________________________   │
+│ Firma y aclaración                          │
+│                                             │
+│ Número de documento: ___________________    │
+└─────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────┐
+│ FIRMA DEL COTITULAR 1                       │
+│ Juan Pérez — Doc: DNI 12345678              │
+│                                             │
+│ _________________________________________   │
+│ Firma y aclaración                          │
+│                                             │
+│ Número de documento: ___________________    │
+└─────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────┐
+│ FIRMA DEL COTITULAR 2                       │
+│ María González — Doc: DNI 87654321          │
+│                                             │
+│ _________________________________________   │
+│ Firma y aclaración                          │
+│                                             │
+│ Número de documento: ___________________    │
+└─────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────┐
+│ FIRMA Y SELLO DEL SUJETO OBLIGADO           │
+│ Certifica que la firma del declarante...    │
+│                                             │
+│ _________________________________________   │
+│ Firma y sello del corredor / martillero    │
+└─────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════
+
+📁 ARCHIVOS MODIFICADOS:
+
+✓ index.html (lógica de generación PDF)
+✓ version.json (v1.2.1)
+✓ sw.js (v1.2.1)
+
+🚀 CÓMO PROBAR:
+
+1. Completar formulario
+2. En paso 6 "Adicionales"
+3. Activar "Hay cotitulares"
+4. Agregar 1, 2, 3 o 4 cotitulares
+5. Ir a Resumen
+6. Verificar y generar PDF
+7. Abrir PDF descargado
+8. Ir a página de firmas
+9. ✓ Verificar que hay 1 espacio de firma por cada cotitular
+
+═══════════════════════════════════════════════════════════
+COMPATIBILIDAD:
+═══════════════════════════════════════════════════════════
+
+✓ Compatible con v1.2.0
+✓ Compatible con v1.1.0
+✓ Compatible con v1.0.0
+
+No requiere migración de datos.
+
+═══════════════════════════════════════════════════════════
+
+Sistema PLAFT-FP 2026 — REMAX CREA
+René A. Vera · CPI 6778 / CSI 5848

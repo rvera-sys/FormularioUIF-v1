@@ -1,0 +1,10 @@
+{
+  "version": "1.2.1",
+  "date": "2026-05-13",
+  "changelog": [
+    "Agregado espacio de firma para cada cotitular en el PDF",
+    "Mejora en declaración jurada para múltiples firmantes"
+  ],
+  "critical": false,
+  "minVersion": "1.0.0"
+}

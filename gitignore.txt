@@ -1,0 +1,30 @@
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node modules (si usas herramientas de build)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Archivos temporales
+*.tmp
+*.bak
+*.log
+
+# Archivos de testing local
+test/
+tests/
+*.test.html
+
+# Archivos de backup
+*.backup
+*-old.*
