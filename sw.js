@@ -1,86 +1,79 @@
-// UIF Inmobiliario â Service Worker v1.1.0
-// Sistema de actualizaciÃ³n automÃ¡tica desde GitHub
+// UIF Inmobiliario — Service Worker v1.3.0
+// Sistema de actualizacion automatica desde GitHub
 
-const VERSION = '1.3.0'; // Incrementa esto en cada actualizaciÃ³n
-const CACHE = `uif-v${VERSION}`;
-const VERSION_URL = './version.json'; // Archivo con info de versiÃ³n en GitHub
+const VERSION = '1.3.0'; // Incrementa esto en cada deploy
+const CACHE   = `uif-v${VERSION}`;
+const VERSION_URL = './version.json'; // Archivo de control de versiones
 
+// Archivos a pre-cachear en la instalacion
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './icon-192.png',
-  './icon-512.png',
-  './version.json',
-  'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+  './icon-512.png'
 ];
 
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-// INSTALACIÃN
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ════════════════════════════════════════
+// INSTALL: pre-cachear assets esenciales
+// ════════════════════════════════════════
 self.addEventListener('install', event => {
-  console.log('[SW] Instalando versiÃ³n', VERSION);
-  
+  console.log('[SW] Instalando v' + VERSION);
   event.waitUntil(
-    caches.open(CACHE)
-      .then(cache => {
-        return cache.addAll(ASSETS.map(url => 
-          new Request(url, { cache: 'reload' })
-        ));
-      })
-      .catch(err => {
-        console.warn('[SW] Error en cachÃ© inicial, continuando...', err);
-        // Cache mÃ­nimo esencial si falla
-        return caches.open(CACHE).then(cache => 
-          cache.addAll(['./index.html', './manifest.json', './version.json'])
-        );
-      })
-      .then(() => {
-        console.log('[SW] CachÃ© creado exitosamente');
-        return self.skipWaiting(); // Activa inmediatamente
-      })
+    caches.open(CACHE).then(cache => {
+      return cache.addAll(ASSETS);
+    }).then(() => {
+      // Tomar control inmediatamente sin esperar recarga
+      return self.skipWaiting();
+    })
   );
 });
 
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-// ACTIVACIÃN
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ════════════════════════════════════════
+// ACTIVATE: limpiar caches viejos y tomar control
+// ════════════════════════════════════════
 self.addEventListener('activate', event => {
-  console.log('[SW] Activando versiÃ³n', VERSION);
-  
+  console.log('[SW] Activando v' + VERSION);
   event.waitUntil(
-    // Limpiar cachÃ©s antiguos
-    caches.keys()
-      .then(keys => {
-        return Promise.all(
-          keys
-            .filter(key => key !== CACHE && key.startsWith('uif-'))
-            .map(key => {
-              console.log('[SW] Eliminando cachÃ© antiguo:', key);
-              return caches.delete(key);
-            })
-        );
-      })
-      .then(() => {
-        console.log('[SW] CachÃ©s antiguos eliminados');
-        return self.clients.claim(); // Toma control inmediato
-      })
+    caches.keys().then(keys => {
+      return Promise.all(
+        keys
+          .filter(key => key.startsWith('uif-') && key !== CACHE)
+          .map(key => {
+            console.log('[SW] Eliminando cache viejo:', key);
+            return caches.delete(key);
+          })
+      );
+    }).then(() => {
+      // Tomar control de todos los clientes abiertos inmediatamente
+      return self.clients.claim();
+    })
   );
 });
 
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-// FETCH - Estrategia de cachÃ©
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ════════════════════════════════════════
+// FETCH: estrategia por tipo de recurso
+// ════════════════════════════════════════
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  
-  // APIs externas: Network-first (con fallback a cachÃ©)
-  if (url.origin !== location.origin) {
+
+  // Solo manejar requests del mismo origen
+  if (url.origin !== location.origin) return;
+
+  // version.json: SIEMPRE desde red (nunca desde cache)
+  if (url.pathname.endsWith('version.json')) {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-store' })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // index.html: network-first (garantiza siempre la ultima version)
+  if (url.pathname === '/' || url.pathname.endsWith('/index.html') || url.pathname.endsWith('/')) {
+    event.respondWith(
+      fetch(event.request, { cache: 'no-cache' })
         .then(response => {
-          // Cachear si es exitoso
           if (response.ok) {
             const clone = response.clone();
             caches.open(CACHE).then(cache => cache.put(event.request, clone));
@@ -91,69 +84,57 @@ self.addEventListener('fetch', event => {
     );
     return;
   }
-  
-  // version.json: SIEMPRE desde red para detectar actualizaciones
-  if (url.pathname.endsWith('version.json')) {
-    event.respondWith(
-      fetch(event.request, { cache: 'no-store' })
-        .catch(() => caches.match(event.request))
-    );
-    return;
-  }
-  
-  // Assets locales: Cache-first (con actualizaciÃ³n en background)
+
+  // Resto de assets: cache-first con actualizacion en background
   event.respondWith(
-    caches.match(event.request)
-      .then(cached => {
-        if (cached) {
-          // Actualizar en background
-          fetch(event.request).then(response => {
-            if (response.ok) {
-              caches.open(CACHE).then(cache => cache.put(event.request, response));
-            }
-          }).catch(() => {});
-          
-          return cached;
-        }
-        
-        // No estÃ¡ en cachÃ©, traer de red
-        return fetch(event.request).then(response => {
+    caches.match(event.request).then(cached => {
+      if (cached) {
+        // Actualizar en background (stale-while-revalidate)
+        fetch(event.request).then(response => {
           if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE).then(cache => cache.put(event.request, clone));
+            caches.open(CACHE).then(cache => cache.put(event.request, response));
           }
-          return response;
-        });
-      })
+        }).catch(() => {});
+        return cached;
+      }
+      // No esta en cache, traer de red
+      return fetch(event.request).then(response => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE).then(cache => cache.put(event.request, clone));
+        }
+        return response;
+      });
+    })
   );
 });
 
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-// CHECK UPDATES - Chequeo periÃ³dico de actualizaciones
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ════════════════════════════════════════
+// MENSAJE: recibir comandos del cliente
+// ════════════════════════════════════════
 self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'CHECK_UPDATE') {
-    checkForUpdates();
-  }
-  
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+  if (event.data && event.data.type === 'CHECK_UPDATE') {
+    checkForUpdates();
+  }
 });
 
+// ════════════════════════════════════════
+// CHECK FOR UPDATES: verificar version.json
+// ════════════════════════════════════════
 async function checkForUpdates() {
   try {
     const response = await fetch(VERSION_URL, { cache: 'no-store' });
     if (!response.ok) return;
-    
     const data = await response.json();
     const latestVersion = data.version;
-    
-    console.log('[SW] VersiÃ³n actual:', VERSION, '| VersiÃ³n disponible:', latestVersion);
-    
-    if (latestVersion !== VERSION) {
+
+    if (latestVersion && latestVersion !== VERSION) {
+      console.log('[SW] Nueva version disponible:', latestVersion, '(actual:', VERSION + ')');
       // Notificar a todos los clientes
-      const clients = await self.clients.matchAll({ type: 'window' });
+      const clients = await self.clients.matchAll({ includeUncontrolled: true });
       clients.forEach(client => {
         client.postMessage({
           type: 'UPDATE_AVAILABLE',
@@ -167,12 +148,17 @@ async function checkForUpdates() {
   }
 }
 
-// Chequear actualizaciones cada hora
-setInterval(checkForUpdates, 60 * 60 * 1000);
+// Chequear actualizaciones cada 30 minutos
+setInterval(checkForUpdates, 30 * 60 * 1000);
 
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-// SYNC BACKGROUND - Para cuando vuelve la conexiÃ³n
-// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Chequear al activar tambien
+self.addEventListener('activate', () => {
+  setTimeout(checkForUpdates, 3000);
+});
+
+// ════════════════════════════════════════
+// SYNC BACKGROUND
+// ════════════════════════════════════════
 self.addEventListener('sync', event => {
   if (event.tag === 'check-update') {
     event.waitUntil(checkForUpdates());
