@@ -1146,6 +1146,9 @@ body { padding-bottom: 130px; }
   .hist-topbar { top: 0; }
   .offline-badge { top: 8px; }
 }
+@media(min-width:1100px){
+  .screen { max-width: 760px; }
+}
 /* MODAL PREVISUALIZACIÓN PDF */
 .pdf-preview-modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.75);z-index:10000;backdrop-filter:blur(4px);animation:fadeIn .2s}
 .pdf-preview-modal.show{display:flex;justify-content:center;align-items:center;padding:20px}
@@ -1175,7 +1178,8 @@ body { padding-bottom: 130px; }
 .pdf-confirm-btn:hover{background:#156334;transform:translateY(-1px);box-shadow:0 4px 12px rgba(26,107,58,.3)}
 .pdf-alert-box{background:var(--naranja-cl);border:1.5px solid var(--naranja-bd);color:var(--naranja);padding:14px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.5;display:flex;align-items:flex-start;gap:10px}
 @media (max-width:600px){
-.pdf-preview-content{max-height:95vh;border-radius:12px}
+.pdf-preview-modal{padding:8px}
+.pdf-preview-content{max-height:95vh;max-width:100%;border-radius:12px}
 .pdf-data-grid{grid-template-columns:1fr}
 .pdf-preview-footer{flex-direction:column-reverse}
 .pdf-preview-footer button{width:100%}
