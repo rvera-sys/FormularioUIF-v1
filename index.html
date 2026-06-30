@@ -1324,6 +1324,11 @@ body { padding-bottom: 130px; }
 <div class="app-screen active" id="screen-formulario">
 <div class="toast" id="toast"></div>
 
+<div class="progress-wrap">
+  <div class="progress-steps" id="psteps"></div>
+  <div class="progress-bar-line"><div class="progress-bar-fill" id="prog-fill" style="width:0%"></div></div>
+</div>
+
 <!-- ══════════════════════════════════
      PANTALLA 0: ROL
 ══════════════════════════════════ -->
@@ -2705,7 +2710,8 @@ function gr(name){ return document.querySelector(`input[name="${name}"]:checked`
 // ── STEP BAR ──
 function buildStepBar(){
   document.getElementById('psteps').innerHTML = STEPS.map((s,i)=>`<div class="pstep${i===current?' active':i<current?' done':''}">${s}</div>`).join('');
-  document.getElementById('topbar-prog').textContent = `Paso ${current+1} de ${STEPS.length}`;
+  const tp = document.getElementById('topbar-prog');
+  if (tp) tp.textContent = `Paso ${current+1} de ${STEPS.length}`;
   // scroll active into view
   const active = document.querySelector('.pstep.active');
   if(active) active.scrollIntoView({inline:'center',behavior:'smooth'});
@@ -4145,12 +4151,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('session-email');
   if (el) el.textContent = email||'—';
 });
-
-
-
-// Init
-document.getElementById('fecha_op').value = new Date().toISOString().split('T')[0];
-showScreen(0);
 
 
 // ═══════════════════════════════════════════════════════════════
