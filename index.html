@@ -2274,6 +2274,9 @@ function switchTab(tab) {
   if (nav) {
     nav.style.display = (tab === 'formulario' && current > 0) ? 'flex' : 'none';
   }
+  if (tab === 'formulario') {
+    autoGuardarBorrador();
+  }
   if (tab === 'historial') loadHistorial();
   if (tab === 'agente') loadAgente();
 }
@@ -2282,7 +2285,7 @@ function switchTab(tab) {
 // ── INDEXEDDB
 // ════════════════════════════════════════════════
 const DB_NAME = 'uif-inmobiliario';
-const DB_VER  = 3;
+const DB_VER  = 4;
 let _db = null;
 
 function openDB() {
@@ -2299,9 +2302,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains('pdfs')) {
         db.createObjectStore('pdfs', { keyPath: 'id' });
-        if (!db.objectStoreNames.contains('borradores')) {
-          db.createObjectStore('borradores', { keyPath: 'id', autoIncrement: true });
-        }
+      }
+      if (!db.objectStoreNames.contains('borradores')) {
+        db.createObjectStore('borradores', { keyPath: 'id', autoIncrement: true });
       }
     };
     req.onsuccess = e => { _db = e.target.result; res(_db); };
@@ -2766,6 +2769,7 @@ function goStep(dir){
   }
   current = Math.max(0,Math.min(STEPS.length-1,current+dir));
   showScreen(current);
+  autoGuardarBorrador();
 }
 
 // ── TOAST ──
@@ -4512,9 +4516,20 @@ function exportarBorrador() {
   document.body.removeChild(a); URL.revokeObjectURL(url);
   guardarBorradorEnDB(datos).then(() => {
     showToast('Borrador guardado y descargado', 2500);
-  }).catch(() => {
-    showToast('Borrador descargado', 2000);
+  }).catch((err) => {
+    console.warn('Error al guardar en DB:', err);
+    showToast('Borrador descargado (no se pudo guardar en la app)', 3000);
   });
+}
+
+async function autoGuardarBorrador() {
+  try {
+    const datos = recolectarDatosFormulario();
+    if (datos.campos && Object.values(datos.campos).some(v => v)) {
+      await guardarBorradorEnDB(datos);
+    }
+  } catch (e) {
+  }
 }
 
 async function guardarBorradorEnDB(datos) {
