@@ -4492,13 +4492,9 @@ function restaurarDatosFormulario(datos) {
   }
   const paso = datos.paso_actual || 0;
   setTimeout(() => {
-    showScreen('formulario');
+    switchTab('formulario');
     current = paso;
-    buildStepBar();
-    updateNav();
-    document.querySelectorAll('.fstep').forEach((s, i) => {
-      s.style.display = i === paso ? 'block' : 'none';
-    });
+    showScreen(paso);
   }, 300);
 }
 
