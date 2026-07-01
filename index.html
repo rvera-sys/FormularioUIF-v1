@@ -4470,11 +4470,11 @@ function restaurarDatosFormulario(datos) {
   });
   if (datos.estado_global) {
     const eg = datos.estado_global;
-    if (eg.rol)          { D.rol = eg.rol; pickRol(eg.rol, true); }
-    if (eg.tipo_persona) { D.tipo_persona = eg.tipo_persona; pickTipoPersona(eg.tipo_persona, true); }
-    if (eg.pep)          { D.pep = eg.pep; pickPEP(eg.pep, true); }
-    if (eg.sob)          { D.sob = eg.sob; pickSOB(eg.sob, true); }
-    if (eg.smvm)         { D.smvm = eg.smvm; }
+    if (eg.rol)          D.rol = eg.rol;
+    if (eg.tipo_persona) D.tipo_persona = eg.tipo_persona;
+    if (eg.pep)          D.pep = eg.pep;
+    if (eg.sob)          D.sob = eg.sob;
+    if (eg.smvm)         D.smvm = eg.smvm;
   }
   if (datos.cotitulares && datos.cotitulares.length > 0) {
     cotCount = 0; cotList = [];
