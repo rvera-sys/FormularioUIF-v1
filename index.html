@@ -3388,8 +3388,10 @@ function addCotitular(){
   const id=++cotCount;
   cotList.push(id);
   renderCotitulares();
-  const items = document.querySelectorAll('.cotit-item');
-  if (items.length) items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (!window._restoringBorrador) {
+    const items = document.querySelectorAll('.cotit-item');
+    if (items.length) items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 }
 function removeCotitular(id){
   cotList=cotList.filter(c=>c!==id);
@@ -4479,6 +4481,7 @@ function restaurarDatosFormulario(datos) {
     if (eg.smvm)         D.smvm = eg.smvm;
   }
   if (datos.cotitulares && datos.cotitulares.length > 0) {
+    window._restoringBorrador = true;
     cotCount = 0; cotList = [];
     datos.cotitulares.forEach((cot, idx) => {
       addCotitular();
@@ -4491,7 +4494,7 @@ function restaurarDatosFormulario(datos) {
       }, 60 * (idx + 1));
     });
   }
-  const paso = datos.paso_actual || 0;
+  const paso = datos.paso_actual || 0; window._restoringBorrador = false;
   setTimeout(() => {
     switchTab('formulario');
     current = paso;
