@@ -3388,6 +3388,8 @@ function addCotitular(){
   const id=++cotCount;
   cotList.push(id);
   renderCotitulares();
+  const items = document.querySelectorAll('.cotit-item');
+  if (items.length) items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 function removeCotitular(id){
   cotList=cotList.filter(c=>c!==id);
@@ -4434,14 +4436,14 @@ function recolectarDatosFormulario() {
     if (el) campos['fp_' + fp] = el.checked;
   });
   const cotitulares = [];
-  for (let i = 1; i <= cotCount; i++) {
+  cotList.forEach(id => {
     const cot = {};
     ['nom','td','nd','cui','nac','fn','ec','pr'].forEach(f => {
-      const el = document.getElementById('cot' + i + '_' + f);
+      const el = document.getElementById('cot' + id + '_' + f);
       if (el) cot[f] = el.value || '';
     });
     cotitulares.push(cot);
-  }
+  });
   return {
     version: typeof CURRENT_VERSION !== 'undefined' ? CURRENT_VERSION : '1.2.0',
     fecha_guardado: new Date().toISOString(),
@@ -4479,12 +4481,11 @@ function restaurarDatosFormulario(datos) {
   if (datos.cotitulares && datos.cotitulares.length > 0) {
     cotCount = 0; cotList = [];
     datos.cotitulares.forEach((cot, idx) => {
-      if (typeof agregarCotitular === 'function') agregarCotitular();
-      else { cotCount++; cotList.push(cotCount); }
+      addCotitular();
       setTimeout(() => {
-        const i = idx + 1;
+        const id = cotList[idx];
         ['nom','td','nd','cui','nac','fn','ec','pr'].forEach(f => {
-          const el = document.getElementById('cot' + i + '_' + f);
+          const el = document.getElementById('cot' + id + '_' + f);
           if (el && cot[f] !== undefined) el.value = cot[f];
         });
       }, 60 * (idx + 1));
