@@ -3401,6 +3401,15 @@ function renderCotitulares(){
   const cont=document.getElementById('cotit-container');
   const btn=document.getElementById('add-cotit-btn');
   if(!cont) return;
+  const vals={};
+  cotList.forEach(id=>{
+    const o={};
+    ['nom','td','nd','cui','nac','fn','ec','pr'].forEach(f=>{
+      const el=document.getElementById('cot'+id+'_'+f);
+      if(el) o[f]=el.value;
+    });
+    vals[id]=o;
+  });
   cont.innerHTML=cotList.map((id,idx)=>`
 <div class="cotit-item">
   <div class="cotit-head"><span>Cotitular ${idx+1}</span><button type="button" class="remove-btn" onclick="removeCotitular(${id})" type="button">Quitar</button></div>
@@ -3415,6 +3424,14 @@ function renderCotitulares(){
     <div class="field"><div class="field-label">Profesión</div><input type="text" id="cot${id}_pr" oninput="autoOk(this)"></div>
   </div>
 </div>`).join('');
+  cotList.forEach(id=>{
+    const o=vals[id];
+    if(!o) return;
+    ['nom','td','nd','cui','nac','fn','ec','pr'].forEach(f=>{
+      const el=document.getElementById('cot'+id+'_'+f);
+      if(el && o[f]!==undefined) el.value=o[f];
+    });
+  });
   if(btn) btn.disabled=cotList.length>=4;
   if(btn) btn.textContent=cotList.length>=4?'Máximo alcanzado (4)':'+ Agregar cotitular';
 }
