@@ -69,8 +69,33 @@ FormularioUIF-v1/
 ├── icon-512.png            # Icono app
 ├── README.md               # Este archivo
 ├── DEPLOYMENT_GUIDE.md     # Guía detallada de deployment
+├── QR_IDENTIDAD_Y_INTEGRIDAD.md  # 🆕 ID propio + QR de integridad (v1.4.0)
+├── vendor/                 # 🆕 Librerías vendorizadas (funcionan offline)
+│   └── qrcode-generator.min.js
+├── tools/                  # 🆕 Utilidades de línea de comandos
+│   └── verificar_qr.py     # Verifica los QR y recalcula el SHA-256 del F1
 └── .gitignore              # Archivos ignorados por Git
 ```
+
+---
+
+## 🔐 Identidad propia y QR de integridad (v1.4.0)
+
+Desde la v1.4.0 cada formulario lleva **un ID generado por el sistema** (independiente
+del ID de operación de la UIF) y **dos códigos QR**:
+
+| QR | Dónde | Qué contiene |
+|----|-------|--------------|
+| **Chico** | Pie de cada página | `ID del formulario \| página N/M \| huella SHA-256` → detecta hojas faltantes, traspapeladas o editadas |
+| **Grande** | Página "Anexo Digital" | El **F1 completo** en JSON canónico + DEFLATE + Base64URL → el PDF escaneado queda autosuficiente |
+
+Verificación desde la línea de comandos:
+
+```bash
+python tools/verificar_qr.py ARCHIVO.pdf
+```
+
+Detalle completo en **[QR_IDENTIDAD_Y_INTEGRIDAD.md](./QR_IDENTIDAD_Y_INTEGRIDAD.md)**.
 
 ---
 
@@ -279,6 +304,7 @@ navigator.serviceWorker.getRegistrations().then(regs => {
 
 ## 📚 Documentación adicional
 
+- **[QR_IDENTIDAD_Y_INTEGRIDAD.md](./QR_IDENTIDAD_Y_INTEGRIDAD.md)** - ID propio del formulario, QR de integridad y verificación
 - **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Guía detallada de deployment
 - **[version.json](./version.json)** - Control de versiones
 - **[manifest.json](./manifest.json)** - Configuración PWA
@@ -299,6 +325,16 @@ navigator.serviceWorker.getRegistrations().then(regs => {
 ---
 
 ## 📝 Changelog
+
+### v1.4.0 (2026-10-22)
+- 🆕 ID propio del formulario generado por el sistema (`CREA-AAMM-XXXXXXXXXXXXXX`)
+- 🆕 QR chico por página: identifica legajo, orden y detecta hojas faltantes
+- 🆕 QR grande en página "Anexo Digital" con el F1 completo (JSON + DEFLATE + Base64URL)
+- 🆕 Huella SHA-256 del contenido canónico del F1
+- 🆕 Verificador `tools/verificar_qr.py` (línea de comandos)
+- 📦 Librería QR vendorizada (`vendor/`) → funciona sin conexión
+- 🔧 Corrección: `CURRENT_VERSION` desincronizada (1.2.2) que siempre notificaba actualización
+- 🔧 Nombre del PDF ahora incluye el ID del formulario
 
 ### v1.2.0 (2026-05-13)
 - ✨ Sistema de previsualización y verificación antes de generar PDF

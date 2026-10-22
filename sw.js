@@ -1,7 +1,7 @@
-// UIF Inmobiliario — Service Worker v1.3.0
+// UIF Inmobiliario — Service Worker v1.4.0
 // Sistema de actualizacion automatica desde GitHub
 
-const VERSION = '1.3.0'; // Incrementa esto en cada deploy
+const VERSION = '1.4.0'; // Incrementa esto en cada deploy
 const CACHE   = `uif-v${VERSION}`;
 const VERSION_URL = './version.json'; // Archivo de control de versiones
 
@@ -11,7 +11,8 @@ const ASSETS = [
   './index.html',
   './manifest.json',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './vendor/qrcode-generator.min.js' // Libreria QR local (funciona sin conexion)
 ];
 
 // ════════════════════════════════════════

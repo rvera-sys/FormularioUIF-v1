@@ -1728,6 +1728,12 @@ body { padding-bottom: 130px; }
   </div>
 
   <div class="field">
+    <div class="field-label">ID del formulario <span style="font-size:11px;font-weight:400;color:#6b7280">(generado por el sistema)</span></div>
+    <input type="text" id="id_form" readonly onclick="this.select()" style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace;letter-spacing:.5px;background:#f5f6f8;color:#1a4a8a;font-weight:600">
+    <div style="font-size:12px;color:#6b7280;margin-top:6px;line-height:1.45">Identifica este formulario ante la UIF. <b>No es el ID de operación</b>: ese lo carga el agente y puede venir vacío. Este se imprime como código QR en todas las páginas del PDF y permite verificar que el documento no fue alterado.</div>
+  </div>
+
+  <div class="field">
     <div class="field-label">Moneda <span class="req">*</span></div>
     <select id="moneda" onchange="onMonedaChange()">
       <option value="">Seleccionar</option>
@@ -2407,7 +2413,7 @@ async function clearAllOperaciones() {
 // ════════════════════════════════════════════════
 // ── AUTO-GUARDAR OPERACIÓN AL GENERAR PDF
 // ════════════════════════════════════════════════
-async function guardarOperacion(pdfBase64, pdfNombre) {
+async function guardarOperacion(pdfBase64, pdfNombre, extra) {
   const agente = loadAgenteData();
   const tp = D.tipo_persona || '';
   const esJur = tp === 'Persona Jurídica';
@@ -2425,6 +2431,8 @@ async function guardarOperacion(pdfBase64, pdfNombre) {
     doc: esJur ? gv('cuit_jur') : (gv('tipo_doc') + ' ' + gv('nro_doc')).trim(),
     cuit: esJur ? gv('cuit_jur') : gv('cuit'),
     id_op: gv('id_op'),
+    id_form: (extra && extra.id_form) || (typeof F1QR !== 'undefined' ? F1QR.idActual() : ''),
+    hash_f1: (extra && extra.hash) || '',
     fecha_op: gv('fecha_op'),
     moneda: gv('moneda'),
     monto_pesos: gv('monto_pesos'),
@@ -2686,9 +2694,13 @@ function escHtml(str) {
 // ════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
   updateHistBadge();
+  if (typeof F1QR !== 'undefined') F1QR.nuevoId();
 });
 
 </script>
+
+<!-- Librería QR vendorizada — funciona sin conexión -->
+<script src="vendor/qrcode-generator.min.js"></script>
 
 <!-- ════════════════════════════════════
      LÓGICA ORIGINAL DEL FORMULARIO
@@ -3466,6 +3478,407 @@ function closePDFPreview(){document.getElementById('pdf-preview-modal').classLis
 function editarSeccion(s){closePDFPreview();current=s;showScreen(current);window.scrollTo({top:0,behavior:'smooth'});showToast('✏️ Editá los datos y luego volvé al resumen',3000)}
 function confirmarYGenerarPDF(){closePDFPreview();showToast('🚀 Generando PDF...',2000);setTimeout(()=>generarPDF(),100)}
 
+
+// ══════════════════════════════════════════════════════════════════
+// F1QR — IDENTIDAD PROPIA DEL FORMULARIO + CÓDIGOS QR DE INTEGRIDAD
+// ------------------------------------------------------------------
+// · Genera un identificador propio del formulario, independiente del
+//   ID de operación de la UIF (que hoy escribe a mano el agente y
+//   puede venir vacío, con "#", con dígitos de más, etc.).
+// · Calcula la huella SHA-256 del contenido canónico del F1.
+// · Produce dos tipos de código QR:
+//     · QR chico  → uno por página:  ID | p/N | hash16
+//       Detecta páginas faltantes, desordenadas o traspapeladas.
+//     · QR grande → payload completo comprimido (Anexo Digital)
+//       Permite reconstruir el F1 entero escaneando el PDF, sin
+//       depender de ningún sistema.
+// · Todo es local: no requiere backend y funciona sin conexión.
+// ══════════════════════════════════════════════════════════════════
+const F1QR = (function () {
+  'use strict';
+
+  const PREFIJO       = 'CREA';
+  const ALFABETO      = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // sin 0,1,I,O,L
+  const RE_ID         = new RegExp('^' + PREFIJO + '-\\d{4}-[' + ALFABETO + ']{8,16}$');
+  const ECC_CHICO     = 'H';    // corrección de errores del QR por página
+  const ECC_GRANDE    = 'M';    // corrección de errores del QR de contenido
+  const MODULO_MM     = 0.5;   // lado mínimo del módulo impreso (sobrevive a 200 dpi)
+  const ZONA_SILENCIO = 4;     // módulos de margen blanco alrededor del QR
+  const MAX_GRANDE_MM = 85;    // tope físico del QR grande
+  const APP_ID        = 'FormularioUIF/1.4.0';
+
+  let _id = '';
+  let _rev = 0;
+
+  // ── Identificador propio ────────────────────────────────────────
+  // 5 caracteres aleatorios = 25 bits (33 millones de combinaciones por milisegundo)
+  function aleatorio(n) {
+    const buf = new Uint8Array(n);
+    window.crypto.getRandomValues(buf);
+    let s = '';
+    for (let i = 0; i < n; i++) s += ALFABETO[buf[i] % ALFABETO.length];
+    return s;
+  }
+
+  // Marca de tiempo en milisegundos desde 2026-01-01 (8 chars base32 ~ 34 años).
+  // Incluye los milisegundos: dos formularios nunca comparten timestamp.
+  const EPOQUE_MS = Date.UTC(2026, 0, 1);
+
+  function tsBase32(milisegundos) {
+    let s = '', n = Math.max(0, Math.floor(milisegundos));
+    while (n > 0) { s = ALFABETO[n % 32] + s; n = Math.floor(n / 32); }
+    return s.padStart(8, ALFABETO[0]);
+  }
+
+  function digitoVerificador(cuerpo) {
+    let acc = 0;
+    for (let i = 0; i < cuerpo.length; i++) acc = (acc + cuerpo.charCodeAt(i) * (i + 1)) % 1000003;
+    return ALFABETO[acc % ALFABETO.length];
+  }
+
+  function generarId() {
+    const d = new Date();
+    const aamm = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0');
+    const cuerpo = tsBase32(d.getTime() - EPOQUE_MS) + aleatorio(5);
+    return PREFIJO + '-' + aamm + '-' + cuerpo + digitoVerificador(cuerpo);
+  }
+
+  function idActual() { if (!_id) _id = generarId(); return _id; }
+  function nuevoId()  { _id = generarId(); _rev = 0; pintarEnUI(); return _id; }
+  function setId(id) {
+    if (typeof id === 'string' && RE_ID.test(id)) { _id = id; pintarEnUI(); }
+    return _id;
+  }
+  function pintarEnUI() {
+    const el = document.getElementById('id_form');
+    if (el) el.value = _id;
+  }
+
+  // ── JSON canónico (claves ordenadas ⇒ hash reproducible) ───────
+  function canonico(obj) {
+    if (obj === undefined) return 'null';
+    if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+    if (Array.isArray(obj)) return '[' + obj.map(canonico).join(',') + ']';
+    const claves = Object.keys(obj).filter(k => obj[k] !== undefined).sort();
+    return '{' + claves.map(k => JSON.stringify(k) + ':' + canonico(obj[k])).join(',') + '}';
+  }
+
+  // ── SHA-256 ────────────────────────────────────────────────────
+  const _K = [
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ];
+
+  function bytesUtf8(s) {
+    const out = [];
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+      else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) {
+        const cp = 0x10000 + ((c - 0xD800) << 10) + (s.charCodeAt(++i) - 0xDC00);
+        out.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+      } else out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return out;
+  }
+
+  function sha256Puro(bytes) {
+    const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    const m = bytes.slice();
+    const len = m.length;
+    m.push(0x80);
+    while (m.length % 64 !== 56) m.push(0);
+    const bits = len * 8;
+    const hi = Math.floor(bits / 4294967296), lo = bits >>> 0;
+    m.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255);
+    m.push((lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+    const w = new Int32Array(64);
+    const rr = (x, n) => (x >>> n) | (x << (32 - n));
+    for (let i = 0; i < m.length; i += 64) {
+      for (let t = 0; t < 16; t++) {
+        w[t] = (m[i + t * 4] << 24) | (m[i + t * 4 + 1] << 16) | (m[i + t * 4 + 2] << 8) | m[i + t * 4 + 3];
+      }
+      for (let t = 16; t < 64; t++) {
+        const x = w[t - 15], y = w[t - 2];
+        const s0 = rr(x, 7) ^ rr(x, 18) ^ (x >>> 3);
+        const s1 = rr(y, 17) ^ rr(y, 19) ^ (y >>> 10);
+        w[t] = (w[t - 16] + s0 + w[t - 7] + s1) | 0;
+      }
+      let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (let t = 0; t < 64; t++) {
+        const S1 = rr(e, 6) ^ rr(e, 11) ^ rr(e, 25);
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + _K[t] + w[t]) | 0;
+        const S0 = rr(a, 2) ^ rr(a, 13) ^ rr(a, 22);
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    let hex = '';
+    for (let i = 0; i < 8; i++) hex += ('00000000' + (H[i] >>> 0).toString(16)).slice(-8);
+    return hex;
+  }
+
+  async function sha256Hex(texto) {
+    if (window.crypto && window.crypto.subtle && typeof TextEncoder !== 'undefined') {
+      try {
+        const buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
+        const v = new Uint8Array(buf);
+        let hex = '';
+        for (let i = 0; i < v.length; i++) hex += v[i].toString(16).padStart(2, '0');
+        return hex;
+      } catch (e) {
+        console.warn('F1QR: crypto.subtle no disponible, uso SHA-256 en JS puro', e);
+      }
+    }
+    return sha256Puro(bytesUtf8(texto));
+  }
+
+  // ── Compresión + Base64URL ─────────────────────────────────────
+  function b64url(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  async function comprimir(texto) {
+    const bytes = new TextEncoder().encode(texto);
+    if (typeof CompressionStream !== 'undefined') {
+      try {
+        const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'));
+        const buf = await new Response(stream).arrayBuffer();
+        return { prefijo: 'UIF1Z:', datos: b64url(new Uint8Array(buf)), crudo: bytes.length, comprimido: buf.byteLength };
+      } catch (e) {
+        console.warn('F1QR: no se pudo comprimir, se usa el JSON crudo', e);
+      }
+    }
+    return { prefijo: 'UIF1R:', datos: b64url(bytes), crudo: bytes.length, comprimido: bytes.length };
+  }
+
+  // ── QR → PNG ───────────────────────────────────────────────────
+  function disponible() { return typeof window.qrcode !== 'undefined'; }
+
+  function qrPng(texto, ecc, pxPorModulo) {
+    if (!disponible()) throw new Error('F1QR: la libreria qrcode-generator no esta cargada');
+    const qr = window.qrcode(0, ecc);
+    qr.addData(texto, 'Byte');
+    qr.make();
+    const n = qr.getModuleCount();
+    const lado = n + ZONA_SILENCIO * 2;
+    const px = pxPorModulo || 8;
+    const cv = document.createElement('canvas');
+    cv.width = lado * px; cv.height = lado * px;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = '#000000';
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (qr.isDark(r, c)) ctx.fillRect((c + ZONA_SILENCIO) * px, (r + ZONA_SILENCIO) * px, px, px);
+      }
+    }
+    return { dataUrl: cv.toDataURL('image/png'), modulos: n, lado: lado };
+  }
+
+  // ── QR vectorial (para el PDF: nítido a cualquier resolución) ──
+  function qrMatriz(texto, ecc) {
+    if (!disponible()) throw new Error('F1QR: la libreria qrcode-generator no esta cargada');
+    const qr = window.qrcode(0, ecc);
+    qr.addData(texto, 'Byte');
+    qr.make();
+    const n = qr.getModuleCount();
+    const filas = [];
+    for (let r = 0; r < n; r++) {
+      const fila = new Array(n);
+      for (let c = 0; c < n; c++) fila[c] = qr.isDark(r, c);
+      filas.push(fila);
+    }
+    return { n: n, filas: filas };
+  }
+
+  // Medidas del QR sin dibujarlo (para elegir ECC y tamaño antes de imprimir)
+  function qrMedida(texto, ecc) {
+    const m = qrMatriz(texto, ecc);
+    return { modulos: m.n, ladoModulos: m.n + ZONA_SILENCIO * 2, mmModulo: MODULO_MM };
+  }
+
+  // Dibuja el QR como rectángulos vectoriales. x,y = esquina superior izq. en mm.
+  function dibujarQr(doc, texto, ecc, x, y, ladoMm) {
+    const m = qrMatriz(texto, ecc);
+    const ladoModulos = m.n + ZONA_SILENCIO * 2;
+    const s = ladoMm / ladoModulos;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, y, ladoMm, ladoMm, 'F');
+    doc.setFillColor(0, 0, 0);
+    for (let r = 0; r < m.n; r++) {
+      const fila = m.filas[r];
+      let c = 0;
+      while (c < m.n) {
+        if (!fila[c]) { c++; continue; }
+        let fin = c;
+        while (fin + 1 < m.n && fila[fin + 1]) fin++;
+        doc.rect(x + (c + ZONA_SILENCIO) * s, y + (r + ZONA_SILENCIO) * s, (fin - c + 1) * s, s, 'F');
+        c = fin + 1;
+      }
+    }
+    return { modulos: m.n, ladoModulos: ladoModulos, mmModulo: s };
+  }
+
+  // ── Payload: el F1 completo, tal como se imprime ──────────────
+  function valor(id) {
+    const el = document.getElementById(id);
+    return el ? (el.value || '') : '';
+  }
+  function marcadas(name) {
+    return Array.from(document.querySelectorAll('input[name="' + name + '"]:checked')).map(x => x.value);
+  }
+
+  function construirPayload(idForm, rev, paginas) {
+    const esJur = D.tipo_persona === 'Persona Jurídica';
+    const esExt = document.querySelector('input[name="dom_pais_tipo"]:checked')?.value === 'extranjero';
+    const tc = (typeof tcCache !== 'undefined' && tcCache._current) ? tcCache._current.valor : '';
+    return {
+      v: 1,
+      app: APP_ID,
+      f: 'F1',
+      id: idForm,
+      rev: rev,
+      em: new Date().toISOString(),
+      paginas: paginas,
+      operacion: {
+        rol: D.rol || '',
+        tipo_persona: D.tipo_persona || '',
+        id_op: valor('id_op'),
+        fecha_op: valor('fecha_op'),
+        moneda: valor('moneda'),
+        monto_orig: valor('monto_orig'),
+        tc: tc ? String(tc) : '',
+        monto_pesos: valor('monto_pesos'),
+        forma_pago: marcadas('forma_pago_chk'),
+        pago_desc: valor('pago_desc'),
+        motivo: valor('motivo'),
+        smvm: D.smvm || '',
+        origen_fondos: marcadas('origen')
+      },
+      inmueble: {
+        nomenclatura: valor('nomenclatura'),
+        calle: valor('calle_inm'),
+        nro: valor('nro_inm'),
+        loc: valor('loc_inm'),
+        cp: valor('cp_inm'),
+        prov: valor('prov_inm')
+      },
+      cliente: esJur ? {
+        tipo: 'Persona Jurídica',
+        razon_social: valor('razon_social'),
+        cuit: valor('cuit_jur'),
+        actividad: valor('actividad_jur'),
+        tel: valor('tel_jur'),
+        email: valor('email_jur'),
+        pct: valor('pct_jur')
+      } : {
+        tipo: 'Persona Humana',
+        apellidos: valor('apellidos'),
+        nombres: valor('nombres'),
+        tipo_doc: valor('tipo_doc'),
+        nro_doc: valor('nro_doc'),
+        cuit: valor('cuit'),
+        fecha_nac: valor('fecha_nac'),
+        lugar_nac: valor('lugar_nac'),
+        nacionalidad: valor('nacionalidad'),
+        estado_civil: valor('estado_civil'),
+        profesion: valor('profesion'),
+        pct: valor('porcentaje')
+      },
+      domicilio: esExt ? {
+        tipo: 'Extranjero',
+        dir: valor('dom_dir_ext'),
+        ciudad: valor('dom_ciudad_ext'),
+        pais: valor('dom_pais_ext'),
+        cp: valor('dom_cp_ext'),
+        area: valor('dom_area'),
+        tel: valor('dom_tel'),
+        email: valor('dom_email')
+      } : {
+        tipo: 'Argentina',
+        calle: valor('dom_calle'),
+        nro: valor('dom_nro'),
+        piso_dpto: valor('dom_pisodpto'),
+        loc: valor('dom_loc'),
+        prov: valor('dom_prov'),
+        cp: valor('dom_cp'),
+        area: valor('dom_area'),
+        tel: valor('dom_tel'),
+        email: valor('dom_email')
+      },
+      declaraciones: {
+        pep: D.pep || '',
+        cargo_pep: valor('cargo_pep'),
+        sob: D.sob || ''
+      },
+      cotitulares: (typeof cotList !== 'undefined' ? cotList : []).map(function (id) {
+        return {
+          nom: valor('cot' + id + '_nom'), td: valor('cot' + id + '_td'),
+          nd: valor('cot' + id + '_nd'), cui: valor('cot' + id + '_cui'),
+          nac: valor('cot' + id + '_nac'), fn: valor('cot' + id + '_fn'),
+          ec: valor('cot' + id + '_ec'), pr: valor('cot' + id + '_pr')
+        };
+      }),
+      apoderado: document.getElementById('chk_apoderado')?.checked ? {
+        tipo: valor('repr_tipo'), nom: valor('repr_nom'), td: valor('repr_td'),
+        nd: valor('repr_nd'), cuit: valor('repr_cuit'), nac: valor('repr_nac')
+      } : null,
+      corredor: document.getElementById('chk_colega')?.checked ? {
+        nom: valor('col_nom'), mat: valor('col_mat'), exp: valor('col_exp'),
+        representa: valor('col_cli'), dir_representado: valor('col_cli_dir'),
+        cuit_representado: valor('col_cli_cuit'), nac_representado: valor('col_cli_fec_nac')
+      } : null
+    };
+  }
+
+  // ──Preparación completa (payload + huella + contenido del QR) ──
+  async function preparar(paginas) {
+    const idForm = idActual();
+    const rev = ++_rev;
+    const payload = construirPayload(idForm, rev, paginas);
+    const canonicoTexto = canonico(payload);
+    const hash = await sha256Hex(canonicoTexto);
+    const payloadFinal = Object.assign({}, payload, { h: hash });
+    const textoFinal = canonico(payloadFinal);
+    const comp = await comprimir(textoFinal);
+    return {
+      idForm: idForm,
+      rev: rev,
+      paginas: paginas,
+      payload: payloadFinal,
+      hash: hash,
+      hash16: hash.slice(0, 16),
+      canonico: canonicoTexto,
+      qrContenido: comp.prefijo + comp.datos,
+      bytesCrudos: comp.crudo,
+      bytesComprimidos: comp.comprimido
+    };
+  }
+
+  return {
+    idActual: idActual, nuevoId: nuevoId, setId: setId, pintarEnUI: pintarEnUI,
+    canonico: canonico, sha256Hex: sha256Hex, comprimir: comprimir,
+    qrPng: qrPng, qrMedida: qrMedida, dibujarQr: dibujarQr, disponible: disponible,
+    construirPayload: construirPayload, preparar: preparar
+  };
+})();
+
 // ── EXPORT CSV ──
 // ── GENERADOR DE PDF ──────────────────────────────────────────────
 async function generarPDF() {
@@ -3490,6 +3903,7 @@ async function generarPDF() {
   const orig = Array.from(document.querySelectorAll('input[name="origen"]:checked')).map(x=>x.value).join(', ');
   const monto = gv('monto_pesos') ? '$'+Number(gv('monto_pesos')).toLocaleString('es-AR') : '';
   const esJur = tp === 'Persona Jurídica';
+  const idForm = F1QR.idActual();
 
   // ── COLORES Y MEDIDAS ──
   const AZL = [26, 74, 138];   // azul header
@@ -3512,8 +3926,12 @@ async function generarPDF() {
     drawPageHeader(false);
   }
 
+  // Límite inferior del contenido: deja libre la franja de verificación
+  // (QR por página + leyenda) que se dibuja al pie de cada hoja.
+  const LIMITE_INFERIOR = PH - 38;   // 259 mm
+
   function checkY(needed) {
-    if (y + needed > PH - 22) newPage();
+    if (y + needed > LIMITE_INFERIOR) newPage();
   }
 
   // ── HEADER PRINCIPAL (pág 1) ──
@@ -3539,7 +3957,9 @@ async function generarPDF() {
       // Fecha generación
       doc.setFontSize(7);
       doc.text(new Date().toLocaleDateString('es-AR'), MR, 10, {align:'right'});
-      doc.text(`ID: ${gv('id_op')||'—'}`, MR, 15, {align:'right'});
+      doc.text(`ID operación: ${gv('id_op')||'—'}`, MR, 15, {align:'right'});
+      doc.setFontSize(6.5);
+      doc.text(`Formulario: ${idForm}`, MR, 19.5, {align:'right'});
       y = 32;
     } else {
       // Header mini páginas siguientes
@@ -3550,7 +3970,9 @@ async function generarPDF() {
       doc.setFontSize(7);
       doc.text('FORMULARIO UIF — Ley 25.246 · Res. UIF 43/2024', ML, 6.5);
       doc.setFont('helvetica','normal');
-      doc.text(`ID: ${gv('id_op')||'—'} · ${new Date().toLocaleDateString('es-AR')}`, MR, 6.5, {align:'right'});
+      doc.text(`ID op.: ${gv('id_op')||'—'} · ${new Date().toLocaleDateString('es-AR')}`, MR, 6.5, {align:'right'});
+      doc.setFontSize(5.5);
+      doc.text(`Formulario: ${idForm}`, MR, 9, {align:'right'});
       y = 14;
     }
   }
@@ -3878,6 +4300,58 @@ async function generarPDF() {
   const nota = 'Esta declaración debe ser integrada por duplicado. El ejemplar intervenido por el sujeto obligado servirá como constancia de recepción para el cliente. Ley 25.246 · Res. UIF 43/2024';
   doc.text(doc.splitTextToSize(nota, TW-4), ML+2, y+4);
 
+  // ── NOTA DE VERIFICACIÓN DIGITAL ──
+  checkY(18);
+  y += 3;
+  doc.setFillColor(...AZC);
+  doc.rect(ML, y, TW, 13, 'F');
+  doc.setDrawColor(...AZL); doc.setLineWidth(0.4);
+  doc.rect(ML, y, TW, 13, 'S');
+  doc.setTextColor(...AZL); doc.setFont('helvetica','bold'); doc.setFontSize(7);
+  doc.text('VERIFICACIÓN DIGITAL', ML+4, y+4.5);
+  doc.setFont('helvetica','normal'); doc.setFontSize(6.5);
+  doc.setTextColor(...NGR);
+  const verifTxt = `Cada hoja de este formulario lleva un código QR con el identificador ${idForm} y la huella SHA-256 del contenido. El Anexo Digital incluye el formulario completo en un único QR: permite detectar cualquier modificación posterior y recuperar los datos sin depender del sistema.`;
+  doc.text(doc.splitTextToSize(verifTxt, TW-8), ML+4, y+8.5);
+  y += 16;
+
+  // ══════════════════════════════════════════
+  // ANEXO DIGITAL — QR con el contenido íntegro
+  // ══════════════════════════════════════════
+  newPage();
+  const PAGINA_ANEXO = doc.internal.getNumberOfPages();
+
+  secHeader('ANEXO DIGITAL — Verificación de integridad del F1');
+
+  doc.setTextColor(...NGR); doc.setFont('helvetica','normal'); doc.setFontSize(7.5);
+  const anexoTxt = 'Este anexo forma parte del formulario F1 identificado con el código ' + idForm + '. '
+    + 'El código QR de la izquierda contiene la totalidad de los datos consignados en el F1 (comprimidos) junto con su huella SHA-256. '
+    + 'Puede leerse sin conexión a ningún sistema y permite detectar cualquier modificación posterior del documento. '
+    + 'No sustituye la firma del declarante ni la del sujeto obligado.';
+  const anexoLines = doc.splitTextToSize(anexoTxt, TW-4);
+  doc.text(anexoLines, ML+2, y+4);
+  y += anexoLines.length * 3.4 + 6;
+
+  // Marco reservado para el QR grande
+  const CAJA = 85;
+  const cajaY = y;
+  doc.setFillColor(255, 255, 255);
+  doc.rect(ML, cajaY, CAJA, CAJA, 'F');
+  doc.setDrawColor(...LIN); doc.setLineWidth(0.4);
+  doc.rect(ML, cajaY, CAJA, CAJA, 'S');
+  doc.setTextColor(...GRS); doc.setFont('helvetica','normal'); doc.setFontSize(6);
+  doc.text('Código QR con el contenido íntegro del formulario F1', ML, cajaY + CAJA + 4.5);
+  doc.text('Se lee con cualquier lector de códigos QR (o con zbarimg / OpenCV).', ML, cajaY + CAJA + 8);
+
+  // Panel lateral: se completa al final, cuando ya se conoce la huella
+  const PANEL_X = ML + CAJA + 6;
+  const PANEL_W = MR - PANEL_X;
+  doc.setFillColor(...GRL);
+  doc.rect(PANEL_X, cajaY, PANEL_W, CAJA, 'F');
+  doc.setDrawColor(...LIN); doc.setLineWidth(0.3);
+  doc.rect(PANEL_X, cajaY, PANEL_W, CAJA, 'S');
+  y = cajaY + CAJA + 12;
+
   // ══════════════════════════════════════════
   // RECIBO DE INTERVENCIÓN (corredor externo)
   // Solo se agrega si hay corredor externo cargado
@@ -4057,8 +4531,102 @@ async function generarPDF() {
     y += 27;
   }
 
-  // ── FOOTER todas las páginas ──
+  // ══════════════════════════════════════════
+  // CÓDIGOS QR DE INTEGRIDAD
+  // ══════════════════════════════════════════
   const totalPages = doc.internal.getNumberOfPages();
+  const MODULO_MM_PDF = 0.5; // lado mínimo del módulo impreso (sobrevive a 200 dpi)
+  let qinfo = null;
+
+  try {
+    if (!F1QR.disponible()) throw new Error('libreria qrcode-generator no cargada');
+
+    qinfo = await F1QR.preparar(totalPages);
+
+    // ── QR grande: payload completo (Anexo Digital) ──
+    // Se elige el nivel de corrección más alto (M) que entre en la caja con
+    // módulos de 0,5 mm. Si no entra, se baja a L / Q / H (más capacidad).
+    let grande = null, eccUsada = '-';
+    for (const ecc of ['M', 'L', 'Q', 'H']) {
+      try {
+        const med = F1QR.qrMedida(qinfo.qrContenido, ecc);
+        const mm = med.ladoModulos * MODULO_MM_PDF;
+        if (!grande || mm < grande.mm) grande = { med: med, ecc: ecc, mm: mm };
+        if (mm <= CAJA) break;
+      } catch (e) {
+        console.warn('F1QR: no se pudo generar el QR grande con ECC ' + ecc, e);
+      }
+    }
+    if (grande) {
+      eccUsada = grande.ecc;
+      const mm = Math.min(grande.mm, CAJA - 4);
+      doc.setPage(PAGINA_ANEXO);
+      F1QR.dibujarQr(doc, qinfo.qrContenido, grande.ecc,
+        ML + (CAJA - mm) / 2, cajaY + (CAJA - mm) / 2, mm);
+    }
+
+    // ── Panel de verificación (Anexo Digital) ──
+    doc.setPage(PAGINA_ANEXO);
+    let py = cajaY + 7;
+    const panelTitulo = (txt) => {
+      doc.setTextColor(...AZL); doc.setFont('helvetica','bold'); doc.setFontSize(7.5);
+      doc.text(txt, PANEL_X + 4, py); py += 6;
+    };
+    const panelLinea = (label, valor, wrap) => {
+      doc.setTextColor(...GRS); doc.setFont('helvetica','normal'); doc.setFontSize(6);
+      doc.text(label, PANEL_X + 4, py);
+      doc.setTextColor(...NGR); doc.setFont('helvetica','bold'); doc.setFontSize(7);
+      if (wrap) {
+        const ls = doc.splitTextToSize(String(valor), PANEL_W - 30);
+        doc.text(ls, PANEL_X + 26, py);
+        py += (ls.length - 1) * 3 + 4.8;
+      } else {
+        doc.text(String(valor), PANEL_X + 26, py);
+        py += 4.8;
+      }
+    };
+
+    panelTitulo('IDENTIFICACIÓN DEL FORMULARIO');
+    panelLinea('Formulario', qinfo.idForm);
+    panelLinea('Revisión', String(qinfo.rev));
+    panelLinea('Emitido', new Date(qinfo.payload.em).toLocaleString('es-AR'));
+    panelLinea('Páginas', qinfo.paginas + ' · QR de contenido en la pág. ' + PAGINA_ANEXO, true);
+    py += 3;
+    panelTitulo('INTEGRIDAD');
+    panelLinea('Algoritmo', 'SHA-256');
+    panelLinea('Huella corta', qinfo.hash16 + '   (la de cada QR de página)');
+    panelLinea('Huella completa', qinfo.hash, true);
+    py += 3;
+    panelTitulo('CONTENIDO DEL QR');
+    panelLinea('Formato', 'JSON canónico + DEFLATE + Base64URL');
+    panelLinea('Tamaño', qinfo.bytesComprimidos + ' B comprimidos / ' + qinfo.bytesCrudos + ' B originales', true);
+    panelLinea('Versión datos', 'v' + qinfo.payload.v + ' · ECC ' + eccUsada + ' · ' + (grande ? grande.med.ladoModulos : 0) + ' módulos (incluye zona de silencio)', true);
+    panelLinea('Módulo impreso', MODULO_MM_PDF + ' mm por módulo · vectorial (escala sin pérdida)', true);
+
+    // ── QR chico: uno por página ──
+    // Marca de integridad por hoja: identifica el legajo, el orden y la página.
+    // Si falta una hoja o se traspapelan, se nota: el numerador no coincide.
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p);
+      const contenido = qinfo.idForm + '|p' + p + '/' + totalPages + '|' + qinfo.hash16;
+      try {
+        const med = F1QR.qrMedida(contenido, 'H');
+        const lado = med.ladoModulos * MODULO_MM_PDF;
+        const yq = PH - 8 - 2 - lado;   // 2 mm por encima de la banda del pie
+        F1QR.dibujarQr(doc, contenido, 'H', MR - lado, yq, lado);
+      } catch (e) {
+        console.warn('F1QR: no se pudo generar el QR de la página ' + p, e);
+      }
+      doc.setTextColor(...GRS); doc.setFont('helvetica','bold'); doc.setFontSize(6);
+      doc.text('Formulario ' + qinfo.idForm, ML, PH - 13);
+      doc.setFont('helvetica','normal'); doc.setFontSize(5.5);
+      doc.text('Página ' + p + ' de ' + totalPages + '  ·  SHA-256 ' + qinfo.hash16, ML, PH - 9.5);
+    }
+  } catch (e) {
+    console.warn('F1QR: no se pudieron generar los códigos QR', e);
+  }
+
+  // ── FOOTER todas las páginas ──
   for (let p=1; p<=totalPages; p++) {
     doc.setPage(p);
     doc.setFillColor(...AZL);
@@ -4070,8 +4638,8 @@ async function generarPDF() {
 
   // ── GUARDAR ──
   const dirInm = [gv('calle_inm'), gv('nro_inm'), gv('loc_inm')].filter(Boolean).join(' ').replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚüÜñÑ\s\-]/g,'').trim() || 'inmueble';
-  const idOp = (gv('id_op') || 'sin-id').replace(/[^a-zA-Z0-9#\-]/g,'');
-  const nombre = `UIF - ${dirInm} - ${idOp}.pdf`;
+  const idOp = (gv('id_op') || '').replace(/[^a-zA-Z0-9#\-]/g,'');
+  const nombre = `UIF - ${dirInm} - ${idForm}${idOp ? ' - ' + idOp : ''}.pdf`;
   doc.save(nombre);
 
   btn.disabled = false;
@@ -4081,7 +4649,7 @@ async function generarPDF() {
   // Guardar en historial con copia del PDF
   try {
     const _b64 = doc.output('datauristring').split(',')[1];
-    await guardarOperacion(_b64, nombre);
+    await guardarOperacion(_b64, nombre, qinfo ? { id_form: qinfo.idForm, hash: qinfo.hash, rev: qinfo.rev } : null);
   } catch(e) { console.warn('Historial:', e); }
 
   // Volver al inicio
@@ -4109,6 +4677,7 @@ function resetForm(){
   const argRadio = document.querySelector('input[name="dom_pais_tipo"][value="argentina"]');
   if(argRadio) argRadio.checked = true;
   current=0; showScreen(0);
+  if (typeof F1QR !== 'undefined') F1QR.nuevoId();
 }
 
 
@@ -4185,7 +4754,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  const CURRENT_VERSION = '1.2.2';
+  const CURRENT_VERSION = '1.4.0';
   let swRegistration = null;
   let updateCheckInterval = null;
 
@@ -4465,6 +5034,7 @@ function recolectarDatosFormulario() {
   });
   return {
     version: typeof CURRENT_VERSION !== 'undefined' ? CURRENT_VERSION : '1.2.0',
+    id_form: (typeof F1QR !== 'undefined') ? F1QR.idActual() : '',
     fecha_guardado: new Date().toISOString(),
     paso_actual: current,
     estado_global: { rol: D.rol||'', tipo_persona: D.tipo_persona||'', pep: D.pep||'', sob: D.sob||'', smvm: D.smvm||'' },
@@ -4477,6 +5047,7 @@ function recolectarDatosFormulario() {
 function restaurarDatosFormulario(datos) {
   if (!datos || !datos.campos) return;
   const c = datos.campos;
+  if (datos.id_form && typeof F1QR !== 'undefined') F1QR.setId(datos.id_form);
   FORM_FIELD_IDS.forEach(id => {
     const el = document.getElementById(id);
     if (el && c[id] !== undefined) el.value = c[id];
